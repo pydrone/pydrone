@@ -30,12 +30,13 @@ from thrust.thrust import Thrust
 from sensor.sensor import Sensor
 from pilot.pilot import Pilot
 from controller.controller import Controller
+from controller.controller import Controller_h
 from time_log import TimeLog
 from led_pyzero import Led
 
 def main_loop(conf_file, log_path, controll_method):
     Led.change(False)
-    pilot = Pilot(controll_method)
+    pilot = Pilot(controll_method, throttle_base=1.2)
     print("Ready")
     cmd = Pilot.CMD_NOP
     while True:
@@ -53,15 +54,16 @@ def main_loop(conf_file, log_path, controll_method):
             if log_path is not None:
                 # over write log_path if --log option is specifed
                 params["log"]["path"] = log_path
-            sensor = Sensor()
-            dt = sensor.sampling_interval()
-            controller = Controller(dt=dt,**params["controller"])
             print("ctrl start")
             pilot.initialize()
             alog = AttitudeLog(**params["log"])
             Led.change(True)
             with Thrust(params["body_const"]) as thrust:
-                control_loop(pilot, sensor, controller, thrust, alog)
+                sensor = Sensor()
+                dt = sensor.sampling_interval()
+                controller = Controller(dt=dt,**params["controller"])
+                controller_h = Controller_h(**params["controller_h"])
+                control_loop(pilot, sensor, controller, controller_h, thrust, alog)
             print("ctrl end")
             Led.change(False)
             alog.add_info('param', params)
@@ -76,10 +78,12 @@ def throttle_correction(throttle_in, angle):
     DEG_TO_RAD = math.pi/180
     return throttle_in/(math.cos(angle[1] * DEG_TO_RAD) * math.cos(angle[2] * DEG_TO_RAD))
 
-def control_loop(pilot, sensor, controller, thrust, alog):
+def control_loop(pilot, sensor, controller, controller_h, thrust, alog):
     timelog = TimeLog()
     start_time = None
     startup_done =False
+    throttle_ctrl = 0
+    last_distance_retrive_time = None
     while True:
         cmd = pilot.get_cmd()
         if cmd==Pilot.CMD_THROTTLE_ZERO:
@@ -91,12 +95,20 @@ def control_loop(pilot, sensor, controller, thrust, alog):
             print("EMERGENCY!")
             break
         timelog.checkpoint_first()
-        retrieve_time, angle, angular_velocity, acc = sensor.get()
+        retrieve_time, angle, angular_velocity, acc, distance, velocity, distance_retrive_time = sensor.get()
         timelog.checkpoint(retrieve_time)
         timelog.checkpoint()
-        throttle, setpoint = pilot.get_setpoint(angle, angular_velocity, acc)
-        throttle_out = throttle_correction(throttle, angle)
+        throttle, setpoint, setpoint_height = \
+            pilot.get_setpoint(angle, angular_velocity, acc, distance)
         tau = controller.out(angle, angular_velocity, setpoint)
+        if(distance is not None):
+            if last_distance_retrive_time is None:
+                dt = 0.01
+            else:
+                dt = distance_retrive_time - last_distance_retrive_time
+            last_distance_retrive_time = distance_retrive_time
+            throttle_ctrl = controller_h.out(distance, velocity, setpoint_height, dt)
+        throttle_out = throttle_correction(throttle, angle) + throttle_ctrl
         thrust.set_thrust(throttle_out, tau)
         time_result = timelog.checkpoint(is_last=True)
         if startup_done == False:
@@ -111,7 +123,8 @@ def control_loop(pilot, sensor, controller, thrust, alog):
                     out_throttle = throttle_out,
                     out_tau = list(tau),
                     pilot_ypr = list(setpoint),
-                    pilot_throttle = throttle) 
+                    pilot_throttle = throttle,
+                    height = list((distance, velocity, distance_retrive_time, setpoint_height))) 
     thrust.set_thrust(0,[0,0,0]) 
 
 

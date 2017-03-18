@@ -170,6 +170,34 @@ def show_throttle(d):
         plt.legend(loc="upper left")
     plt.show()
 
+def show_height(d):
+    title_list = ["throttle","height","velocity"]
+    label_list = [["pilot", "out"],["height","setpoint"],["velocity"]]
+    style_list = [["-r", "-g"],["-r","-g"],["-r"]]
+
+    x = [e['time'] for e in d]
+    N = len(title_list)
+    for i in range(N):
+        y_list = []
+        if i==0:
+            y_list.append([e["pilot_throttle"] for e in d])
+            y_list.append([e["out_throttle"] for e in d])
+        elif i==1:
+            y_list.append([e["height"][0] for e in d])
+            y_list.append([e["height"][3] for e in d])
+        else:
+            y_list.append([e["height"][1] for e in d])
+                
+        plt.subplot(N, 1, i+1)                    
+        for y, label, style in zip(y_list, label_list[i], style_list[i]):
+            plt.plot(x, y,style, label=label)
+            plt.legend()
+        plt.grid(True)
+        plt.title(title_list[i])
+        plt.xlim(left = x[0], right= x[-1])
+        plt.legend(loc="upper left")
+    plt.show()
+
 
 if __name__ == "__main__":
     function_table = {
@@ -178,6 +206,7 @@ if __name__ == "__main__":
         "sensor": show_sensor,
         "pid_out": show_pidout,
         "throttle": show_throttle,
+        "height": show_height,
     }
     usage = "usage: %prog [options] cmd file_name"
     parser = OptionParser(usage)

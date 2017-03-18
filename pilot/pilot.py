@@ -51,6 +51,10 @@ class Pilot:
         self.throttle_base = 0
         self.throttle_base_target = throttle_base
         self.startup_time = startup_time
+        self.last_height = None
+        self.height_setpoint = None
+        self.yaw_setpoint = None
+        self.last_yaw_angle = None
         if controll_method == Pilot.METHOD_UDP:
             js_io = JoystickUDP()
         else:
@@ -89,13 +93,14 @@ class Pilot:
             return
         print("trim_throttle/forward/right ={:7.3f} / {:7.3f} / {:7.3f}".format(self.throttle_base, self.trim_forward, self.trim_right))
             
-    def get_setpoint(self, angle, angular_velocity, acc):
+    def get_setpoint(self, angle, angular_velocity, acc, height):
         self.linear_throttle_up()
         ypr, throttle_js = self._js.axis()
         yaw = self.yaw_ctrl(ypr[0], angle[0])
+        height = self.height_ctrl(throttle_js, height,max_height=1.0)
         pitch, roll = self.pitch_roll_ctrl(ypr[1],ypr[2])
-        throttle = self.throttle_ctrl(throttle_js) 
-        return (throttle, [yaw, pitch, roll])
+        throttle = self.throttle_ctrl(0) 
+        return (throttle, [yaw, pitch, roll], height)
         
     def get_cmd(self):
         cmd = self._js.cmd()
@@ -111,25 +116,50 @@ class Pilot:
         # -20 degree to 20 degree
         return [pitch*20, roll*20]
 
-    def yaw_ctrl(self, joystick_val, angle):
-        # if last value is not known use current value
-        if self.last_yaw_setpoint == None:
-            self.last_yaw_setpoint = angle
-
-        JOYSTICK_DEAD = 0.05  
-        if abs(joystick_val) < JOYSTICK_DEAD:
-            #no need change setpoint
-            setpoint = self.last_yaw_setpoint
+    def dead(self, val, JOYSTICK_DEAD=0.05):
+        if abs(val) < JOYSTICK_DEAD:
+            return 0
         else:
             #update setpoint
-            if joystick_val < 0:
-                joystick_val += JOYSTICK_DEAD 
+            if val < 0:
+               val += JOYSTICK_DEAD 
             else:
-                joystick_val -= JOYSTICK_DEAD 
-            # move setpoint to joystick direction
-            # maximaum speed is 30deg/sec
-            setpoint = self.last_yaw_setpoint + joystick_val * 30 / 100 # 100 update per sec 
-            setpoint = wrap_180(setpoint)
-        self.last_yaw_setpoint = setpoint
-        return setpoint
+                val -= JOYSTICK_DEAD
+            return val;
+
+    def yaw_ctrl(self, joystick_val, angle):
+        # if last value is not known use current value
+        joystick_val = self.dead(joystick_val)
+        if self.last_yaw_angle is None:
+            self.last_yaw_angle = angle
+        if self.yaw_setpoint is None:
+            self.yaw_setpoint = angle
+        if joystick_val == 0:
+            self.yaw_setpoint = self.last_yaw_angle
+            return self.last_yaw_angle
+        else:
+            self.yaw_setpoint += joystick_val * 30 / 100 # 100 update per sec 
+            self.yaw_setpoint = wrap_180(self.yaw_setpoint)
+            self.last_yaw_angle = angle
+            return self.yaw_setpoint
             
+    def height_ctrl(self, joystick_val, height,max_height=1.0, min_height=0.1):
+        joystick_val = self.dead(joystick_val)
+        if self.height_setpoint is None:
+            self.height_setpoint = min_height
+        if self.last_height is None:
+            self.last_height = min_height
+        if joystick_val == 0:
+            self.height_setpoint = self.last_height
+            if self.last_height is None:
+                self.last_height = min_height
+            return self.last_height
+        else:
+            self.height_setpoint += joystick_val * 1 / 100 # 1m update per sec 
+            if self.height_setpoint < min_height:
+                self.height_setpoint = min_height
+            if self.height_setpoint > max_height:
+                self.height_setpoint = max_height
+            if height is not None:
+                self.last_height = height
+            return self.height_setpoint

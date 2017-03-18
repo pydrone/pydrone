@@ -38,3 +38,19 @@ class Controller:
 
         return [control["yaw"], control["pitch"], control["roll"]]
    
+class Controller_h:
+    def __init__(self, pid_velocity_const, pid_height_const):
+        self.pid_velocity = PID(**pid_velocity_const)
+        self.pid_height = PID(**pid_height_const) 
+    def out(self, height, velocity, setpoint, dt):
+        height_control = self.pid_height.out(setpoint, height, dt)
+        if height_control > 0.5:
+            height_control = 0.5
+        if height_control < -0.5:
+            height_control = -0.5
+        velocity_control = self.pid_velocity.out(height_control, velocity, dt)
+        if velocity_control > 0.5:
+            velocity_control = 0.5
+        if velocity_control < -0.5:
+            velocity_control = -0.5
+        return velocity_control
